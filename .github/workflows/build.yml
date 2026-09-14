@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - run: dotnet restore Inkwell.slnx
+
+      # Warnings are errors here but not locally, so a warning cannot quietly accumulate on main
+      # while still leaving an ordinary `dotnet build` usable while working.
+      - run: dotnet build Inkwell.slnx --no-restore -c Release -warnaserror
+
+      - run: dotnet test Inkwell.slnx --no-build -c Release --verbosity normal
+
+      # Packing on every build, rather than only on a tag, so a packaging mistake surfaces in the
+      # pull request that caused it instead of on release day.
+      - run: dotnet pack Inkwell.slnx --no-build -c Release -o artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/*

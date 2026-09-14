@@ -1,0 +1,12 @@
+# Normalize line endings so Windows checkouts and Linux CI agree.
+* text=auto
+
+*.cs text diff=csharp
+*.csproj text
+*.slnx text
+*.json text
+*.yml text
+*.md text
+
+*.png binary
+*.ico binary

@@ -1,0 +1,32 @@
+<Project>
+
+  <!-- Shared by both packages, so version and provenance cannot drift between them. -->
+  <PropertyGroup>
+    <Authors>Structed</Authors>
+    <Company>Structed</Company>
+    <Copyright>Copyright (c) the Inkwell contributors</Copyright>
+    <PackageProjectUrl>https://github.com/structed/inkwell</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/structed/inkwell</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- Overridden by the publish workflow from the tag it was triggered by. A local `dotnet pack`
+         produces this, which is deliberately not a version anyone could mistake for a release. -->
+    <Version>0.1.0-local</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- The XML doc comments are for the reader, not for a compliance sweep: an undocumented public
+         member is not a build failure here. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,48 @@
+name: Publish
+
+# Releasing is tagging. The tag is the version, so there is no second place to forget to update.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: nuget
+      url: https://www.nuget.org/packages/Structed.Inkwell
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Read the version from the tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - run: dotnet restore Inkwell.slnx
+
+      - run: dotnet build Inkwell.slnx --no-restore -c Release -warnaserror -p:Version=${{ steps.version.outputs.value }}
+
+      # A release that fails its own tests is not a release.
+      - run: dotnet test Inkwell.slnx --no-build -c Release
+
+      - run: dotnet pack Inkwell.slnx --no-build -c Release -o artifacts -p:Version=${{ steps.version.outputs.value }}
+
+      # --skip-duplicate so re-running a partly failed publish finishes the job rather than
+      # aborting on the package that already went up. Symbol packages go with them.
+      - name: Push to nuget.org
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --source https://api.nuget.org/v3/index.json
+          --api-key "$NUGET_API_KEY"
+          --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

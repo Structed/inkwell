@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Structed.Inkwell</RootNamespace>
+    <AssemblyName>Structed.Inkwell</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Consumed by a Blazor WebAssembly app, where anything the trimmer cannot prove is reachable
+         is dead weight in every visitor's download. -->
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Structed.Inkwell</PackageId>
+    <Description>
+      A seeded generator engine for table-driven tabletop tools: stable PCG32 randomness, per-field
+      random streams that make one value re-rollable without disturbing its neighbours, JSON
+      translation overlays, provenance and licensing, hand-inked SVG map drawing, and a versioned
+      document envelope for sharing what was generated. Knows nothing about any particular game.
+    </Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>tabletop;rpg;generator;osr;procedural;svg;deterministic</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The tests reach internal helpers such as the name assembler's seam smoothing directly,
+         rather than widening the public API purely to make them reachable. -->
+    <InternalsVisibleTo Include="Inkwell.Tests" />
+  </ItemGroup>
+
+</Project>

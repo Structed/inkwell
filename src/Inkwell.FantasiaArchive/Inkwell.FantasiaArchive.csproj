@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Structed.Inkwell.Interop.FantasiaArchive</RootNamespace>
+    <AssemblyName>Structed.Inkwell.FantasiaArchive</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Consumed by a Blazor WebAssembly app, where anything the trimmer cannot prove is reachable
+         is dead weight in every visitor's download. -->
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Structed.Inkwell.FantasiaArchive</PackageId>
+    <Description>
+      Writes and reads Fantasia Archive v1 projects: PouchDB database dumps, the polymorphic
+      document and field model, paired relationships, reproducible document identities, and the ZIP
+      an in-browser tool has to hand over in place of a folder. Separate from Structed.Inkwell
+      because it is an integration with somebody else's application rather than part of generating
+      anything.
+    </Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>tabletop;rpg;fantasia-archive;worldbuilding;interop;pouchdb</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Inkwell\Inkwell.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Inkwell.FantasiaArchive.Tests" />
+  </ItemGroup>
+
+</Project>
