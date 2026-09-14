@@ -49,8 +49,9 @@ jobs:
         uses: NuGet/login@v1
         id: login
         with:
-          # nuget.org profile name, not an email address.
-          user: Structed
+          # nuget.org profile name, not an email address, and not necessarily the GitHub
+          # handle: the bare "structed" on nuget.org is somebody else's account.
+          user: Structed.me
 
       # --skip-duplicate so re-running a partly failed publish finishes the job rather than
       # aborting on the package that already went up. Symbol packages go with them.

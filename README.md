@@ -164,7 +164,10 @@ any of them in `publish.yml` means editing the policy to match:
 | Workflow File | `publish.yml` |
 | Environment | `nuget` |
 
-The `user:` given to `NuGet/login` is the nuget.org **profile name**, not an email address.
+The `user:` given to `NuGet/login` is the nuget.org **profile name** of the policy's creator —
+`Structed.me` — not an email address and not the GitHub handle. They are easy to confuse: the bare
+`structed` on nuget.org is a different account, and using it fails the token exchange with a 401
+saying no matching trust policy was found.
 
 ## Where this came from
 
