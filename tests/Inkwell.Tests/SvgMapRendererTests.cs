@@ -208,4 +208,21 @@ public class SvgMapRendererTests
         // A city map that ran to megabytes would make the page and the print view unusable.
         Assert.InRange(SvgMapRenderer.Render(Map(11, 6), 11).Length, 2_000, 400_000);
     }
+    /// <summary>
+    /// The markup is built from multi-line raw string literals, so its newlines are whatever the
+    /// source file was saved with. A Windows checkout compiles CRLF into the output and a Linux one
+    /// compiles LF, which means the same engine built in two places renders the same seed as
+    /// different bytes. Nothing on screen changes, so the only way this surfaces is as a hash that
+    /// will not reproduce.
+    /// </summary>
+    [Fact]
+    public void OutputCarriesNoCarriageReturnsWhereverItWasCompiled()
+    {
+        for (uint seed = 1; seed <= 10; seed++)
+        {
+            string svg = SvgMapRenderer.Render(Map(seed, 6, water: true, keys: 3), seed);
+
+            Assert.DoesNotContain('\r', svg);
+        }
+    }
 }

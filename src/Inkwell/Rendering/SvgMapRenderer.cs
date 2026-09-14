@@ -57,7 +57,13 @@ public static class SvgMapRenderer
         AppendKeys(svg, map);
 
         svg.Append("</svg>");
-        return svg.ToString();
+
+        // The markup above is written as multi-line raw string literals, whose newlines are
+        // whatever the source file was saved with: CRLF from a Windows checkout, LF from a Linux
+        // one. Without this, the same engine compiled on two machines emits different bytes for
+        // the same seed, which is invisible on screen but breaks any hash, cache key or golden
+        // test taken over the output.
+        return svg.ToString().ReplaceLineEndings("\n");
     }
 
     private static void AppendDefs(StringBuilder svg, uint seed)
