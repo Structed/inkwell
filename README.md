@@ -143,6 +143,29 @@ dotnet test                  # the whole suite
 dotnet pack -c Release       # both packages
 ```
 
+## Releasing
+
+Releasing is tagging. `v0.2.1` builds, tests, packs and pushes `0.2.1`; the tag is the version, so
+there is no second place to forget to update.
+
+```pwsh
+git tag v0.2.1 && git push origin v0.2.1
+```
+
+Publishing uses [NuGet trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing):
+nuget.org trades a signed GitHub OIDC token for an API key valid for one hour, so this repository
+holds no publishing secret at all. The policy on nuget.org is pinned to these values, and changing
+any of them in `publish.yml` means editing the policy to match:
+
+| Policy field | Value |
+| --- | --- |
+| Repository Owner | `Structed` |
+| Repository | `inkwell` |
+| Workflow File | `publish.yml` |
+| Environment | `nuget` |
+
+The `user:` given to `NuGet/login` is the nuget.org **profile name**, not an email address.
+
 ## Where this came from
 
 Inkwell was extracted from

@@ -12,6 +12,13 @@ jobs:
   publish:
     runs-on: ubuntu-latest
 
+    # Trusted publishing: nuget.org trades a signed GitHub OIDC token for an API key that
+    # lives one hour, so there is no long-lived secret in this repository to leak or rotate.
+    # The matching policy on nuget.org is pinned to this workflow file and this environment.
+    permissions:
+      contents: read
+      id-token: write
+
     environment:
       name: nuget
       url: https://www.nuget.org/packages/Structed.Inkwell
@@ -36,13 +43,20 @@ jobs:
 
       - run: dotnet pack Inkwell.slnx --no-build -c Release -o artifacts -p:Version=${{ steps.version.outputs.value }}
 
+      # Requested here rather than at the top of the job because the key expires after an
+      # hour, and the build and tests above are what might take one.
+      - name: Exchange the OIDC token for a short-lived key
+        uses: NuGet/login@v1
+        id: login
+        with:
+          # nuget.org profile name, not an email address.
+          user: Structed
+
       # --skip-duplicate so re-running a partly failed publish finishes the job rather than
       # aborting on the package that already went up. Symbol packages go with them.
       - name: Push to nuget.org
         run: >
           dotnet nuget push "artifacts/*.nupkg"
           --source https://api.nuget.org/v3/index.json
-          --api-key "$NUGET_API_KEY"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           --skip-duplicate
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
