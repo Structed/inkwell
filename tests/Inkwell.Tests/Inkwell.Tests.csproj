@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Inkwell\Inkwell.csproj" />
+    <ProjectReference Include="..\..\src\Inkwell.Party.Blazor\Inkwell.Party.Blazor.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Structed.Inkwell.Party.Blazor</RootNamespace>
+    <AssemblyName>Structed.Inkwell.Party.Blazor</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Consumed by a Blazor WebAssembly app, where anything the trimmer cannot prove is reachable
+         is dead weight in every visitor's download. -->
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Structed.Inkwell.Party.Blazor</PackageId>
+    <Description>
+      The browser half of Inkwell's shared dice table: a Blazor component-model channel over a
+      peer-to-peer room, with the JavaScript transport shipped alongside it as a static web asset.
+      There is no server and no account — a table code is the whole of it, private rolls are ghosted
+      before anything leaves the machine, and every message from another browser is refused unless
+      it is exactly a roll or a name.
+    </Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>tabletop;rpg;dice;blazor;webrtc;peer-to-peer;trystero</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The smallest thing that compiles. The channel needs a JS runtime, a module handle and the
+         object reference JavaScript calls back on; taking a framework reference to the whole of
+         ASP.NET Core to get them would make this package unusable outside a hosted app. -->
+    <PackageReference Include="Microsoft.JSInterop" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Inkwell\Inkwell.csproj" />
+  </ItemGroup>
+
+</Project>

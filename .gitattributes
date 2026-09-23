@@ -5,8 +5,19 @@
 *.csproj text
 *.slnx text
 *.json text
+*.js text
 *.yml text
 *.md text
 
 *.png binary
 *.ico binary
+
+# The golden baselines are compared byte for byte against text the tests generate with LF, and are
+# rewritten in place by UPDATE_GOLDEN=1. Pinning them to LF keeps a Windows checkout from showing a
+# whole fixture as modified the moment anyone regenerates it — and, more to the point, keeps CI on
+# Linux and a developer on Windows from disagreeing about what a seed produces.
+tests/**/Fixtures/*.txt text eol=lf
+
+# The vendored Trystero bundle is upstream's bytes, not ours. Pinning it to LF keeps a refresh
+# downloaded from esm.sh producing a diff of what actually changed rather than of every line.
+src/Inkwell.Party.Blazor/wwwroot/js/trystero-nostr.js text eol=lf linguist-vendored

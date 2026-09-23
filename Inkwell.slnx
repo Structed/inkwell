@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Inkwell/Inkwell.csproj" />
     <Project Path="src/Inkwell.FantasiaArchive/Inkwell.FantasiaArchive.csproj" />
+    <Project Path="src/Inkwell.Party.Blazor/Inkwell.Party.Blazor.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Inkwell.FantasiaArchive.Tests/Inkwell.FantasiaArchive.Tests.csproj" />

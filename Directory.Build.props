@@ -1,6 +1,6 @@
 <Project>
 
-  <!-- Shared by both packages, so version and provenance cannot drift between them. -->
+  <!-- Shared by every package, so version and provenance cannot drift between them. -->
   <PropertyGroup>
     <Authors>Structed</Authors>
     <Company>Structed</Company>
