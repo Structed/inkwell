@@ -10,6 +10,7 @@ translatable and shareable.
 | Package | |
 | --- | --- |
 | `Structed.Inkwell` | The engine. |
+| `Structed.Inkwell.Party.Blazor` | Optional. The browser half of the shared dice table. |
 | `Structed.Inkwell.FantasiaArchive` | Optional. Writes and reads [Fantasia Archive](https://github.com/vishiri/fantasia-archive) projects. |
 
 ```pwsh
@@ -45,6 +46,13 @@ the same seed produces the same drawing, down to the last shaky line.
 **A versioned envelope for what came out.** Format id, version and payload, with the format and
 version checked on the way back in, so a file from another tool is refused plainly instead of
 half-read.
+
+**A dice table the whole party can see.** Notation a person types — `4d6kh3+1` — rolled off a seed
+so the result can be pasted into a chat window and rebuilt exactly by somebody whose browser could
+not reach the table. Rolls travel directly between browsers over a table code, with no server and
+no account; a private roll is reduced to the fact that somebody rolled before anything leaves the
+machine, and the protocol is two message types wide so a channel that carries dice and names cannot
+be talked into carrying anything else.
 
 ## A worked shape
 
@@ -114,6 +122,36 @@ interface with users on the other side of it. Pin them in a test that compares w
 output against a committed fixture, and never regenerate that fixture to make a failing build pass
 — that is the one move that defeats the entire safeguard.
 
+## The shared dice table
+
+`Structed.Inkwell.Party.Blazor` is a separate package because it is the only thing here that needs
+a browser, and a tool that generates on a server or at a command line should not have to carry a
+WebRTC transport to do it.
+
+The rules live in `Structed.Inkwell` — the notation parser, the poker reading, the seeded roll, the
+log, the roster, the table code and the two message types that are the entire protocol — and all of
+it is testable without a page. This package is the other half: a `PartyChannel` that owns the
+JavaScript module and decides what leaves the machine, shipped with that module beside it as a
+static web asset.
+
+```csharp
+// The app id namespaces the signalling, so two unrelated tools sharing a public relay never meet.
+// Everybody who is to sit at the same table must pass the same string, and changing it later
+// strands every table code already written down — so pick one and keep it.
+PartyChannel channel = new(js, "your-tool-dice") { Player = "Ada" };
+
+await channel.JoinAsync(TableCode.Create());
+
+DiceNotation.TryParse("4d6kh3+1", out DiceNotation notation);
+await channel.RollAsync(DiceRolls.Roll(notation), reading: null, secret: false);
+```
+
+Two things are worth knowing before building on it. A private roll is **ghosted at the moment it is
+made**, not at the moment it is sent, so there is never a full copy of it in a variable something
+else might pick up; the dice are not encrypted or held back, they are never sent. And every message
+that arrives is read by `RollMessage.TryRead` or `Hail.TryRead` before anything is done with it,
+because on a public relay the input is whoever has the table code.
+
 ## Fantasia Archive
 
 `Structed.Inkwell.FantasiaArchive` is a separate package because it is an integration with somebody
@@ -140,7 +178,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```pwsh
 dotnet test                  # the whole suite
-dotnet pack -c Release       # both packages
+dotnet pack -c Release       # every package
 ```
 
 ## Releasing
@@ -187,3 +225,26 @@ MIT. See [LICENSE](LICENSE).
 
 Inkwell ships no game content: no tables, no names, no prose. What you roll on is yours, and its
 licence is yours to get right.
+
+### Trystero
+
+The dice table's peer-to-peer connection uses [Trystero](https://github.com/dmotz/trystero) 0.25.4
+by Dan Motzenbecker, MIT licensed. The Nostr strategy bundle is vendored verbatim at
+`src/Inkwell.Party.Blazor/wwwroot/js/trystero-nostr.js`, with its origin and refresh instructions in
+a banner at the top of the file.
+
+Vendoring rather than loading it from a CDN keeps a site working when a CDN does not, and means no
+third party can change what runs on the page between one session and the next. The bundle carries
+its own copy of [@noble/secp256k1](https://github.com/paulmillr/noble-secp256k1) by Paul Miller,
+also MIT licensed, which Trystero uses to sign the Nostr events that carry the signalling.
+
+To refresh it, download
+`https://esm.sh/trystero@0.25.4/es2022/trystero.bundle.mjs` — bumping the version in the URL and in
+the banner together — replace everything below the banner, and check the bundle is still
+self-contained, which means it declares no imports of its own. It is saved as `.js` rather than
+`.mjs` because GitHub Pages serves `.mjs` with a MIME type browsers refuse to import, and it is
+pinned to LF in `.gitattributes` so a refresh shows a diff of what actually changed rather than of
+every line.
+
+Neither library sees a roll. They establish the connection; the dice travel directly between
+browsers over it.
