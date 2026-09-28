@@ -90,6 +90,94 @@ public sealed class PartyChannelTests
     }
 
     /// <summary>
+    /// A host that names no relays gets exactly what it got before there was a way to name them.
+    /// </summary>
+    /// <remarks>
+    /// Null is the transport's cue to fall back on Trystero's own draw. Anything else — an empty
+    /// list included — would change which relays every existing table is signalled through.
+    /// </remarks>
+    [Fact]
+    public async Task WithoutRelaysTheTransportIsLeftToChooseItsOwn()
+    {
+        (_, FakeRuntime runtime) = await JoinedAsync();
+
+        object?[] join = runtime.Module.Calls.Single(call => call.Method == "join").Arguments;
+
+        Assert.Null(join[1]);
+    }
+
+    /// <summary>
+    /// The relays a host names reach the transport as named, in order, alongside the app id.
+    /// </summary>
+    /// <remarks>
+    /// The draw Trystero makes on its own is fixed by the app id, so a relay that has died stays in
+    /// it for good. Naming the relays is the only way round that, and it only works if what was
+    /// named is what is used.
+    /// </remarks>
+    [Fact]
+    public async Task NamedRelaysAreHandedToTheTransportAsGiven()
+    {
+        FakeRuntime runtime = new();
+        PartyChannel channel = new(runtime, AppId, relays: ["wss://relay.example", "ws://localhost:7777/"]);
+
+        await channel.JoinAsync(TableCode.Create());
+
+        object?[] join = runtime.Module.Calls.Single(call => call.Method == "join").Arguments;
+
+        Assert.Equal(AppId, join[0]);
+        Assert.Equal(["wss://relay.example", "ws://localhost:7777/"], Assert.IsType<string[]>(join[1]));
+    }
+
+    /// <summary>A relay typed with stray spaces, or twice, is still one relay.</summary>
+    [Fact]
+    public async Task NamedRelaysAreTrimmedAndNotRepeated()
+    {
+        FakeRuntime runtime = new();
+        PartyChannel channel = new(
+            runtime,
+            AppId,
+            relays: [" wss://relay.example ", "wss://other.example", "wss://relay.example"]);
+
+        await channel.JoinAsync(TableCode.Create());
+
+        object?[] join = runtime.Module.Calls.Single(call => call.Method == "join").Arguments;
+
+        Assert.Equal(["wss://relay.example", "wss://other.example"], Assert.IsType<string[]>(join[1]));
+    }
+
+    /// <summary>
+    /// A relay the transport could never open is refused while it is still the host's mistake.
+    /// </summary>
+    /// <remarks>
+    /// Left to the browser, each of these fails the way a deleted relay does: silently, costing the
+    /// table a relay it believes it has.
+    /// </remarks>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("relay.example")]
+    [InlineData("https://relay.example")]
+    [InlineData("wss://")]
+    [InlineData("not a url")]
+    public void ARelayThatIsNotAWebSocketUrlIsRefused(string relay)
+    {
+        ArgumentException refused = Assert.Throws<ArgumentException>(
+            () => new PartyChannel(new FakeRuntime(), AppId, relays: ["wss://relay.example", relay]));
+
+        Assert.Equal("relays", refused.ParamName);
+    }
+
+    /// <summary>An empty list is not "the defaults"; it is no way for anybody to find the table.</summary>
+    [Fact]
+    public void AnEmptyListOfRelaysIsRefused()
+    {
+        ArgumentException refused = Assert.Throws<ArgumentException>(
+            () => new PartyChannel(new FakeRuntime(), AppId, relays: []));
+
+        Assert.Equal("relays", refused.ParamName);
+    }
+
+    /// <summary>
     /// A private roll is ghosted before it is sent, not after.
     /// </summary>
     /// <remarks>

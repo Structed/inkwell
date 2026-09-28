@@ -57,7 +57,23 @@ public enum PartyStatus
 /// called strands every table code already written down. Pick one and keep it.
 /// </para>
 /// </param>
-public sealed class PartyChannel(IJSRuntime js, string appId) : IAsyncDisposable
+/// <param name="relays">
+/// <para>
+/// The Nostr relays the table is signalled through, as <c>wss://</c> (or <c>ws://</c>) URLs, or
+/// <see langword="null"/> to leave the choice to Trystero.
+/// </para>
+/// <para>
+/// Left to itself, Trystero takes five relays from a list compiled into its bundle, shuffled by the
+/// app id alone — so the draw is the same for every table the app ever opens, and a relay that has
+/// died stays in it however often anybody rejoins. Naming them here replaces that draw outright:
+/// every relay given is used, and nothing else is.
+/// </para>
+/// <para>
+/// Like the app id, this describes the app rather than the table. Relays are how players find each
+/// other, so everybody who is to sit at the same table must share at least one of them.
+/// </para>
+/// </param>
+public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string>? relays = null) : IAsyncDisposable
 {
     /// <summary>Where the packaged module lands once the host has collected its static assets.</summary>
     private const string ModulePath = "./_content/Structed.Inkwell.Party.Blazor/js/party.js";
@@ -66,6 +82,7 @@ public sealed class PartyChannel(IJSRuntime js, string appId) : IAsyncDisposable
     private readonly string app = string.IsNullOrWhiteSpace(appId)
         ? throw new ArgumentException("A party channel needs an app id to namespace its signalling.", nameof(appId))
         : appId;
+    private readonly string[]? relays = ReadRelays(relays);
     private IJSObjectReference? module;
     private DotNetObjectReference<PartyChannel>? self;
 
@@ -110,7 +127,7 @@ public sealed class PartyChannel(IJSRuntime js, string appId) : IAsyncDisposable
             module ??= await js.InvokeAsync<IJSObjectReference>("import", ModulePath);
             self ??= DotNetObjectReference.Create(this);
 
-            await module.InvokeAsync<string>("join", app, parsed, self);
+            await module.InvokeAsync<string>("join", app, relays, parsed, self);
         }
         catch (Exception error) when (error is JSException or InvalidOperationException)
         {
@@ -301,6 +318,48 @@ public sealed class PartyChannel(IJSRuntime js, string appId) : IAsyncDisposable
     /// </remarks>
     [JSInvokable]
     public string Replay() => RollHistory.Write(Log.Replay());
+
+    /// <summary>Checks the host's relays once, up front, rather than at a table nobody can find.</summary>
+    /// <remarks>
+    /// A relay that is not a WebSocket URL fails exactly as quietly as one that has been deleted, so
+    /// it is refused here, where the mistake is still the host's and can still be read. An empty
+    /// list is refused for the same reason: Trystero would take it at its word and signal through
+    /// nothing, which is a table that looks open and can never be joined.
+    /// </remarks>
+    private static string[]? ReadRelays(IEnumerable<string>? relays)
+    {
+        if (relays is null)
+        {
+            return null;
+        }
+
+        List<string> read = [];
+
+        foreach (string? relay in relays)
+        {
+            string url = relay?.Trim() ?? "";
+
+            if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
+                || uri.Scheme is not ("wss" or "ws")
+                || uri.Host.Length == 0)
+            {
+                throw new ArgumentException(
+                    $"A relay has to be a wss:// or ws:// URL, and '{relay}' is not one.",
+                    nameof(relays));
+            }
+
+            if (!read.Contains(url, StringComparer.Ordinal))
+            {
+                read.Add(url);
+            }
+        }
+
+        return read.Count > 0
+            ? [.. read]
+            : throw new ArgumentException(
+                "A party channel given no relays could never be found. Pass null to use Trystero's own.",
+                nameof(relays));
+    }
 
     public async ValueTask DisposeAsync()
     {
