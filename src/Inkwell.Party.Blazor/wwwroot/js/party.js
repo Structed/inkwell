@@ -28,11 +28,12 @@ let table = null;
 // `appId` namespaces the signalling so two unrelated apps using the same relays never meet, even if
 // somebody picks the same room code by accident. It is supplied by the caller rather than fixed
 // here, because this file is shared and the app it is running inside is the only thing that knows
-// which app it is.
-export async function join(appId, code, handler) {
+// which app it is. `relays` is the same kind of fact — which relays the app signals through — and
+// is null when the app has left that to Trystero.
+export async function join(appId, relays, code, handler) {
     leave();
 
-    const room = joinRoom({ appId }, code);
+    const room = joinRoom(settings(appId, relays), code);
 
     // Trystero hands back one object per action, and the receiving side is a settable property
     // rather than a register-a-callback function. The sender is `send(payload, { target })`, and
@@ -146,6 +147,21 @@ export async function join(appId, code, handler) {
     watch(current);
 
     return selfId;
+}
+
+/// What Trystero is told about the app: its id, and its relays when the app has named any.
+//
+// Left without `relayConfig`, Trystero takes five relays from a list compiled into its bundle,
+// shuffled by the app id alone, so the draw never changes and a dead relay in it stays there. Given
+// `urls`, it uses exactly those and applies no redundancy limit to them. An empty list would be
+// taken at its word and signal through nothing, so it is treated as not having named any; C# has
+// already refused one, and this is only the second line.
+function settings(appId, relays) {
+    const urls = Array.isArray(relays)
+        ? relays.filter(url => typeof url === 'string' && url.length > 0)
+        : [];
+
+    return urls.length > 0 ? { appId, relayConfig: { urls } } : { appId };
 }
 
 /// Sends one roll to everybody at the table.

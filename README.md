@@ -152,6 +152,23 @@ else might pick up; the dice are not encrypted or held back, they are never sent
 that arrives is read by `RollMessage.TryRead` or `Hail.TryRead` before anything is done with it,
 because on a public relay the input is whoever has the table code.
 
+### Choosing the relays
+
+Left to itself, Trystero signals through five Nostr relays taken from a list compiled into its
+bundle, shuffled by the **app id alone** — so every table an app ever opens uses the same five, and
+a relay in that draw that has since died stays in it through every rejoin and reload. A host that
+would rather choose can name its relays next to the app id:
+
+```csharp
+PartyChannel channel = new(js, "your-tool-dice", relays: ["wss://relay.example", "wss://other.example"]);
+```
+
+Every relay named is used and nothing else is; leave `relays` out, or pass `null`, for Trystero's
+own draw. Each has to be a `wss://` (or `ws://`) URL, and an empty list is refused rather than
+treated as the defaults, because a table signalled through nothing looks open and can never be
+found. Like the app id, the relays describe the app rather than the table: players only meet if
+they share at least one, so change them with the same care.
+
 ## Fantasia Archive
 
 `Structed.Inkwell.FantasiaArchive` is a separate package because it is an integration with somebody
