@@ -132,12 +132,14 @@ public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string
     /// </para>
     /// <para>
     /// The table is signalled through Nostr relays, which judge an event by the clock that signed
-    /// it. Probed live, the strfry relays answer <c>"invalid: ephemeral event expired"</c> to an
-    /// event more than sixty seconds old and <c>"invalid: created_at too late"</c> to one more than
-    /// fifteen minutes ahead, and a relay that accepts a ninety-second-old event still leaves it out
-    /// of a subscription for events since now. So a player whose clock is a minute out sits at the
-    /// table unseen and unseeing, with every relay saying so to nobody. This is how a page can tell
-    /// them why.
+    /// it. Probed live, most relays refuse an ephemeral event more than a minute old (strfry answers
+    /// <c>"invalid: ephemeral event expired"</c> or <c>"invalid: created_at too early"</c>), and some
+    /// refuse one far in the future (<c>"invalid: created_at too late"</c>), though how far is each
+    /// relay's own choice. Relays that take a skewed event anyway still filter by <c>since</c>: a
+    /// slow clock's events fall before every other player's subscription, and a fast clock
+    /// subscribes from a moment nobody else has reached, so it never hears the replies. Either way a
+    /// player whose clock is a minute out meets nobody, with every relay saying so to nobody. This
+    /// is how a page can tell them why.
     /// </para>
     /// </remarks>
     public TimeSpan? ClockOffset { get; private set; }

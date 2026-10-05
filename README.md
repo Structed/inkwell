@@ -176,9 +176,10 @@ A table that stays empty usually has one of two causes, and neither says so on i
 measures both, so a page can.
 
 **A wrong clock.** The signalling is Nostr, and Nostr relays judge an event by the clock that signed
-it: the strfry relays refuse an ephemeral event more than a minute old and one more than fifteen
-minutes ahead, and relays that accept one anyway leave it out of a subscription for events since
-now. A player whose clock is a minute out is invisible both ways. So before it first joins a table,
+it. Most refuse an ephemeral event more than a minute old; some refuse one far in the future; and
+relays that take a skewed event anyway hide it behind other players' `since`, or hide everybody
+else's from a fast clock, whose subscription starts from a moment nobody else has reached. A player
+whose clock is a minute out meets nobody either way. So before it first joins a table,
 the transport asks the site for the time — a `HEAD` request for the page, read from its `Date`
 header — and, if the machine is ten seconds or more out, signals on the site's clock for the rest
 of the page's life. `ClockOffset` says how far out it was found to be (positive when the machine is

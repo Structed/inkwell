@@ -21,14 +21,15 @@ least be told why not.
 ### Fixed
 
 - **A wrong clock no longer makes a player invisible.** Nostr relays judge an event by the clock that
-  signed it: the strfry relays refuse an ephemeral event more than sixty seconds old
-  (`invalid: ephemeral event expired`) or more than fifteen minutes ahead
-  (`invalid: created_at too late`), and relays that accept one anyway leave it out of a
-  subscription for events since now. Before it first joins a table, the transport now measures the
-  machine's clock against the site's `Date` header and, if it is ten seconds or more out, signals
-  on the site's time for the rest of the page's life.
-- **Relays are not given up on.** Under 0.25.4 a relay that answered `invalid:` once — as the strfry
-  relays do to a player with a wrong clock — was dropped for the page's life, and a socket that kept
+  signed it. Most refuse an ephemeral event more than a minute old
+  (`invalid: ephemeral event expired`, or `invalid: created_at too early`); some refuse one far in
+  the future (`invalid: created_at too late`), at a limit each relay sets for itself; and relays
+  that take a skewed event anyway hide it behind other players' `since`, or hide everybody else's
+  from a fast clock. Before it first joins a table, the transport now measures the machine's clock
+  against the site's `Date` header and, if it is ten seconds or more out, signals on the site's time
+  for the rest of the page's life.
+- **Relays are not given up on.** Under 0.25.4 a relay that answered `invalid:` once — as most
+  relays do to a slow clock — was dropped for the page's life, and a socket that kept
   failing was closed for good after about a minute of backoff. 0.26.0 retires a relay only for
   being blocked, restricted or asking for auth or proof of work, and retries the rest forever with
   backoff capped at a minute, re-announcing on reconnect.

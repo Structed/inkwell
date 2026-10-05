@@ -27,11 +27,13 @@ const allowanceWindow = 10000;
 // at the other end.
 const rehailInterval = 30000;
 
-// The signalling is Nostr, and Nostr relays judge an event by the clock that signed it. The strfry
-// relays refuse an ephemeral event more than sixty seconds old ("invalid: ephemeral event expired")
-// and one more than fifteen minutes ahead ("invalid: created_at too late"), and the ones that take
-// it anyway filter it out of a subscription asking for events since now. A player whose clock is a
-// minute out is therefore invisible both ways, on every relay, without anything saying why. Ten
+// The signalling is Nostr, and Nostr relays judge an event by the clock that signed it. Probed live,
+// most refuse an ephemeral event more than a minute old ("invalid: ephemeral event expired", or
+// "invalid: created_at too early"), and some refuse one far in the future ("invalid: created_at too
+// late") — though how far is each relay's own choice. The ones that take a skewed event anyway still
+// filter by `since`: a slow clock's events fall before everybody else's subscription, and a fast
+// clock subscribes from a moment nobody else has reached, so it never hears the replies. A player
+// whose clock is a minute out therefore meets nobody, on any relay, without anything saying why. Ten
 // seconds is well inside every limit seen, and far outside what measuring over HTTP gets wrong.
 const clockTolerance = 10000;
 
