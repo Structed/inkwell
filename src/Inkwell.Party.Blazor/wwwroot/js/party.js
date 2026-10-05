@@ -38,8 +38,9 @@ const clockTolerance = 10000;
 // How long a join waits to hear the time before going ahead without it.
 const clockPatience = 3000;
 
-// No server answering this request can be telling the truth with a date earlier than this file. A
-// header that says otherwise is a broken proxy, and believing it would wind the page back years.
+// A fixed floor: the day this check was written. No server telling the truth can send a date before
+// it, so a header that does is a broken proxy, and believing it would wind the page back years. It
+// only ever has to be earlier than now, so it never needs moving when this file changes.
 const earliestPlausibleDate = Date.UTC(2026, 9, 1);
 
 // The machine's own clock, taken before anything here has had the chance to correct it.

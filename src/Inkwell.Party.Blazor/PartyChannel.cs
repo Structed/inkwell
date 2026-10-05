@@ -345,9 +345,10 @@ public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string
     [JSInvokable]
     public void ReceiveHail(string peer, string json)
     {
-        bool reached = Reach(peer);
+        bool changed = Reach(peer);
+        changed |= Hail.TryRead(json, out Hail hail) && Roster.Greet(peer, hail);
 
-        if ((Hail.TryRead(json, out Hail hail) && Roster.Greet(peer, hail)) | reached)
+        if (changed)
         {
             Changed?.Invoke();
         }
@@ -357,7 +358,10 @@ public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string
     [JSInvokable]
     public void ReceiveDeparture(string peer)
     {
-        if (Roster.Leave(peer) | Reach(peer))
+        bool changed = Roster.Leave(peer);
+        changed |= Reach(peer);
+
+        if (changed)
         {
             Changed?.Invoke();
         }

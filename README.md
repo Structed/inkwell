@@ -188,7 +188,8 @@ so a large offset with `ClockCorrected` false is a player who should reload or f
 
 **A connection that could not be made.** Two browsers can find each other through the relays and
 still fail to connect directly — almost always two networks that need a TURN server, with none
-configured. `Unreachable` counts the peers that happened to, until they connect, say hello or leave.
+configured. `Unreachable` counts the peers the relays found but this browser could not connect to,
+until they connect, say hello or leave.
 
 ```razor
 @if (channel.ClockOffset is { } offset && !channel.ClockCorrected && offset.Duration() >= TimeSpan.FromSeconds(10))

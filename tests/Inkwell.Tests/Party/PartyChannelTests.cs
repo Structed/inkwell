@@ -373,6 +373,37 @@ public sealed class PartyChannelTests
         Assert.False(channel.ClockCorrected);
     }
 
+    /// <summary>The largest believable offset is still a clock reading.</summary>
+    [Fact]
+    public async Task AClockReadingAtTheLimitIsKept()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+
+        double maximumOffsetMs = TimeSpan.FromDays(36525).TotalMilliseconds;
+        channel.ReceiveClock(maximumOffsetMs, corrected: true);
+
+        Assert.Equal(TimeSpan.FromDays(36525), channel.ClockOffset);
+        Assert.True(channel.ClockCorrected);
+    }
+
+    /// <summary>A reading just beyond the clock limit is not rounded back into range.</summary>
+    [Fact]
+    public async Task AClockReadingJustOutsideTheLimitIsIgnored()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(1_000, corrected: false);
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        double maximumOffsetMs = TimeSpan.FromDays(36525).TotalMilliseconds;
+        channel.ReceiveClock(maximumOffsetMs + 0.4, corrected: true);
+
+        Assert.Equal(TimeSpan.FromSeconds(1), channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+        Assert.Equal(0, changes);
+    }
+
     /// <summary>Telling the page the same thing twice does not redraw it twice.</summary>
     [Fact]
     public async Task AnUnchangedClockReadingRaisesNoChange()
