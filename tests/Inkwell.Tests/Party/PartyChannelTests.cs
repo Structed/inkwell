@@ -337,6 +337,352 @@ public sealed class PartyChannelTests
         Assert.Equal(PartyStatus.Away, channel.Status);
     }
 
+    /// <summary>
+    /// How far out this machine's clock is, as the transport measured it, and whether it acted.
+    /// </summary>
+    /// <remarks>
+    /// The relays refuse or filter out what a skewed clock signs, so a player a minute out never
+    /// sees anybody. This is the only place a page can learn why.
+    /// </remarks>
+    [Fact]
+    public async Task TheClockReadingIsRecorded()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        Assert.Null(channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+
+        channel.ReceiveClock(-123_456, corrected: true);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(-123_456), channel.ClockOffset);
+        Assert.True(channel.ClockCorrected);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>The offset is worked out from halves of a round trip and is kept to the millisecond.</summary>
+    [Fact]
+    public async Task TheClockReadingIsRoundedToWholeMilliseconds()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+
+        channel.ReceiveClock(1_500.6, corrected: false);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(1_501), channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+    }
+
+    /// <summary>The largest believable offset is still a clock reading.</summary>
+    [Fact]
+    public async Task AClockReadingAtTheLimitIsKept()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+
+        double maximumOffsetMs = TimeSpan.FromDays(36525).TotalMilliseconds;
+        channel.ReceiveClock(maximumOffsetMs, corrected: true);
+
+        Assert.Equal(TimeSpan.FromDays(36525), channel.ClockOffset);
+        Assert.True(channel.ClockCorrected);
+    }
+
+    /// <summary>A reading just beyond the clock limit is not rounded back into range.</summary>
+    [Fact]
+    public async Task AClockReadingJustOutsideTheLimitIsIgnored()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(1_000, corrected: false);
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        double maximumOffsetMs = TimeSpan.FromDays(36525).TotalMilliseconds;
+        channel.ReceiveClock(maximumOffsetMs + 0.4, corrected: true);
+
+        Assert.Equal(TimeSpan.FromSeconds(1), channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+        Assert.Equal(0, changes);
+    }
+
+    /// <summary>Telling the page the same thing twice does not redraw it twice.</summary>
+    [Fact]
+    public async Task AnUnchangedClockReadingRaisesNoChange()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(42, corrected: false);
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveClock(42, corrected: false);
+        Assert.Equal(0, changes);
+
+        channel.ReceiveClock(42, corrected: true);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>
+    /// A number from JavaScript that is not a believable clock is ignored rather than thrown on.
+    /// </summary>
+    /// <remarks>
+    /// NaN and the infinities are ordinary JavaScript numbers, and <see cref="TimeSpan"/> throws on
+    /// all three and on anything near its own limits. None of them is an answer worth showing.
+    /// </remarks>
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    [InlineData(double.MaxValue)]
+    [InlineData(double.MinValue)]
+    [InlineData(1e16)]
+    [InlineData(-1e16)]
+    public async Task AnUnbelievableClockReadingIsIgnored(double offsetMs)
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(1_000, corrected: false);
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveClock(offsetMs, corrected: true);
+
+        Assert.Equal(TimeSpan.FromSeconds(1), channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+        Assert.Equal(0, changes);
+    }
+
+    /// <summary>A reading that arrives after leaving belongs to no table.</summary>
+    [Fact]
+    public void AClockReadingArrivingWhileAwayIsIgnored()
+    {
+        PartyChannel channel = new(new FakeRuntime(), AppId);
+
+        channel.ReceiveClock(-90_000, corrected: true);
+
+        Assert.Null(channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+    }
+
+    /// <summary>
+    /// A peer the relays found and the browser could not reach is counted, not lost.
+    /// </summary>
+    /// <remarks>
+    /// Without TURN, two networks that cannot meet directly look exactly like an empty table.
+    /// Saying "somebody is there and cannot be reached" is the difference between a player trying
+    /// another network and a player giving up.
+    /// </remarks>
+    [Fact]
+    public async Task APeerThatCannotBeReachedIsCounted()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveJoinError("peer-1");
+
+        Assert.Equal(1, channel.Unreachable);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>Trystero reports a peer again on every attempt; it is still one peer.</summary>
+    [Fact]
+    public async Task APeerThatFailsTwiceIsCountedOnce()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+
+        channel.ReceiveJoinError("peer-1");
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveJoinError("peer-1");
+
+        Assert.Equal(1, channel.Unreachable);
+        Assert.Equal(0, changes);
+    }
+
+    /// <summary>A peer that says hello has plainly been reached.</summary>
+    [Fact]
+    public async Task AHailClearsAnUnreachablePeer()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveJoinError("peer-1");
+        channel.ReceiveJoinError("peer-2");
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveHail("peer-1", Hail.From("Bran", DateTimeOffset.UnixEpoch).Write());
+
+        Assert.Equal(1, channel.Unreachable);
+        Assert.Equal(1, channel.Roster.Count);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>
+    /// A hail that cannot be read still came down a working connection.
+    /// </summary>
+    /// <remarks>
+    /// The seat waits for a readable name, but the warning that nobody could be reached would be
+    /// wrong as soon as anything at all had arrived.
+    /// </remarks>
+    [Fact]
+    public async Task AnUnreadableHailStillClearsAnUnreachablePeer()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveJoinError("peer-1");
+
+        channel.ReceiveHail("peer-1", "not a hail");
+
+        Assert.Equal(0, channel.Unreachable);
+        Assert.Equal(0, channel.Roster.Count);
+    }
+
+    /// <summary>A peer that failed once and connected later is no longer unreachable.</summary>
+    [Fact]
+    public async Task AnArrivalClearsAnUnreachablePeer()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveJoinError("peer-1");
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveArrival("peer-1");
+
+        Assert.Equal(0, channel.Unreachable);
+        Assert.Equal(0, channel.Roster.Count);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>An arrival nobody was worried about changes nothing anybody can see.</summary>
+    [Fact]
+    public async Task AnArrivalOfAnUnknownPeerRaisesNoChange()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveArrival("peer-1");
+        channel.ReceiveArrival(null);
+
+        Assert.Equal(0, changes);
+    }
+
+    /// <summary>A peer that has gone is not still somebody who cannot be reached.</summary>
+    [Fact]
+    public async Task ADepartureClearsAnUnreachablePeer()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveJoinError("peer-1");
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveDeparture("peer-1");
+
+        Assert.Equal(0, channel.Unreachable);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>
+    /// A peer id that could not be anybody's is not counted.
+    /// </summary>
+    /// <remarks>
+    /// The id came from another browser by way of the relays, so it is treated as input rather than
+    /// as Trystero's word.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(UnusablePeers))]
+    public async Task AnUnusablePeerIdIsNotCounted(string? peer)
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveJoinError(peer);
+
+        Assert.Equal(0, channel.Unreachable);
+        Assert.Equal(0, changes);
+    }
+
+    public static TheoryData<string?> UnusablePeers => new()
+    {
+        null,
+        "",
+        "   ",
+        "a b",
+        "peer\u0000",
+        "peer\n",
+        new string('p', Roster.MaximumPeerLength + 1)
+    };
+
+    /// <summary>The longest id the roster would seat is long enough to count.</summary>
+    [Fact]
+    public async Task APeerIdAtTheLengthLimitIsCounted()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+
+        channel.ReceiveJoinError(new string('p', Roster.MaximumPeerLength));
+
+        Assert.Equal(1, channel.Unreachable);
+    }
+
+    /// <summary>A failure reported after leaving belongs to no table.</summary>
+    [Fact]
+    public void AJoinErrorArrivingWhileAwayIsIgnored()
+    {
+        PartyChannel channel = new(new FakeRuntime(), AppId);
+
+        channel.ReceiveJoinError("peer-1");
+
+        Assert.Equal(0, channel.Unreachable);
+    }
+
+    /// <summary>
+    /// However many failures arrive, the count stops where the roster does.
+    /// </summary>
+    /// <remarks>
+    /// Every id here is somebody else's to invent, so the set holding them cannot be left to grow.
+    /// </remarks>
+    [Fact]
+    public async Task TheUnreachableCountIsBounded()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+
+        for (int index = 0; index < Roster.MaximumPlayers * 4; index++)
+        {
+            channel.ReceiveJoinError(FormattableString.Invariant($"peer-{index}"));
+        }
+
+        Assert.Equal(Roster.MaximumPlayers, channel.Unreachable);
+
+        channel.ReceiveDeparture("peer-0");
+        channel.ReceiveJoinError("peer-new");
+
+        Assert.Equal(Roster.MaximumPlayers, channel.Unreachable);
+    }
+
+    /// <summary>Leaving forgets the clock reading and who could not be reached.</summary>
+    /// <remarks>
+    /// The page keeps its correction, if it made one, and reports it again at the next table. What
+    /// is cleared is only this channel's account of the last one.
+    /// </remarks>
+    [Fact]
+    public async Task LeavingForgetsTheClockAndTheUnreachablePeers()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+
+        channel.ReceiveClock(-120_000, corrected: true);
+        channel.ReceiveJoinError("peer-1");
+
+        await channel.LeaveAsync();
+
+        Assert.Null(channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+        Assert.Equal(0, channel.Unreachable);
+    }
+
     /// <summary>Answers every call with nothing, and remembers being asked.</summary>
     private sealed class FakeRuntime : IJSRuntime
     {
