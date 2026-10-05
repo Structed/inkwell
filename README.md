@@ -137,7 +137,8 @@ static web asset.
 ```csharp
 // The app id namespaces the signalling, so two unrelated tools sharing a public relay never meet.
 // Everybody who is to sit at the same table must pass the same string, and changing it later
-// strands every table code already written down — so pick one and keep it.
+// strands every table code already written down — so pick one and keep it, until the transport
+// underneath changes what it sends (see "Upgrading to 0.4.0" below).
 PartyChannel channel = new(js, "your-tool-dice") { Player = "Ada" };
 
 await channel.JoinAsync(TableCode.Create());
@@ -168,6 +169,51 @@ own draw. Each has to be a `wss://` (or `ws://`) URL, and an empty list is refus
 treated as the defaults, because a table signalled through nothing looks open and can never be
 found. Like the app id, the relays describe the app rather than the table: players only meet if
 they share at least one, so change them with the same care.
+
+### When nobody turns up
+
+A table that stays empty usually has one of two causes, and neither says so on its own. The channel
+measures both, so a page can.
+
+**A wrong clock.** The signalling is Nostr, and Nostr relays judge an event by the clock that signed
+it: the strfry relays refuse an ephemeral event more than a minute old and one more than fifteen
+minutes ahead, and relays that accept one anyway leave it out of a subscription for events since
+now. A player whose clock is a minute out is invisible both ways. So before it first joins a table,
+the transport asks the site for the time — a `HEAD` request for the page, read from its `Date`
+header — and, if the machine is ten seconds or more out, signals on the site's clock for the rest
+of the page's life. `ClockOffset` says how far out it was found to be (positive when the machine is
+behind; `null` if the site could not be asked) and `ClockCorrected` whether the page acted on it.
+The measurement waits at most three seconds; one that arrives later is reported but not applied,
+so a large offset with `ClockCorrected` false is a player who should reload or fix their clock.
+
+**A connection that could not be made.** Two browsers can find each other through the relays and
+still fail to connect directly — almost always two networks that need a TURN server, with none
+configured. `Unreachable` counts the peers that happened to, until they connect, say hello or leave.
+
+```razor
+@if (channel.ClockOffset is { } offset && !channel.ClockCorrected && offset.Duration() >= TimeSpan.FromSeconds(10))
+{
+    <p>Your clock is @offset.Duration().TotalSeconds.ToString("0") seconds out. Reload the page, or set it right.</p>
+}
+@if (channel.Unreachable > 0)
+{
+    <p>@channel.Unreachable player(s) found the table but could not connect to you.</p>
+}
+```
+
+Both raise `Changed`. The transport also checks the seats against the connections Trystero actually
+holds every two seconds, and says this player's name again every thirty seconds and whenever the
+page comes back into view, so a missed arrival, departure or hail repairs itself rather than
+leaving a seat saying hello for good.
+
+### Upgrading to 0.4.0
+
+0.4.0 moves the transport to Trystero 0.26.0, whose wire format between browsers is not compatible
+with 0.25.4's: a player on an Inkwell before 0.4.0 and a player on 0.4.0 can find each other through
+the relays and then never exchange a roll. **Change your app id when you upgrade** — to
+`your-tool-dice-2`, say — so that old and new builds of your site sit at separate tables rather
+than half-connecting to each other while browsers and caches catch up. Nothing else in the C# API
+changed incompatibly; Inkwell's own messages are unchanged.
 
 ## Fantasia Archive
 
@@ -201,7 +247,8 @@ dotnet pack -c Release       # every package
 ## Releasing
 
 Releasing is tagging. `v0.2.1` builds, tests, packs and pushes `0.2.1`; the tag is the version, so
-there is no second place to forget to update.
+there is no second place to forget to update. What changed goes in [CHANGELOG.md](CHANGELOG.md)
+before the tag does.
 
 ```pwsh
 git tag v0.2.1 && git push origin v0.2.1
@@ -245,10 +292,12 @@ licence is yours to get right.
 
 ### Trystero
 
-The dice table's peer-to-peer connection uses [Trystero](https://github.com/dmotz/trystero) 0.25.4
+The dice table's peer-to-peer connection uses [Trystero](https://github.com/dmotz/trystero) 0.26.0
 by Dan Motzenbecker, MIT licensed. The Nostr strategy bundle is vendored verbatim at
 `src/Inkwell.Party.Blazor/wwwroot/js/trystero-nostr.js`, with its origin and refresh instructions in
-a banner at the top of the file.
+a banner at the top of the file. Apps that read relay health themselves can import
+`getRelaySockets` from `_content/Structed.Inkwell.Party.Blazor/js/trystero-nostr.js`, which is the
+same module instance the table uses.
 
 Vendoring rather than loading it from a CDN keeps a site working when a CDN does not, and means no
 third party can change what runs on the page between one session and the next. The bundle carries
@@ -256,12 +305,18 @@ its own copy of [@noble/secp256k1](https://github.com/paulmillr/noble-secp256k1)
 also MIT licensed, which Trystero uses to sign the Nostr events that carry the signalling.
 
 To refresh it, download
-`https://esm.sh/trystero@0.25.4/es2022/trystero.bundle.mjs` — bumping the version in the URL and in
-the banner together — replace everything below the banner, and check the bundle is still
-self-contained, which means it declares no imports of its own. It is saved as `.js` rather than
-`.mjs` because GitHub Pages serves `.mjs` with a MIME type browsers refuse to import, and it is
-pinned to LF in `.gitattributes` so a refresh shows a diff of what actually changed rather than of
-every line.
+`https://esm.sh/trystero@0.26.0/es2022/trystero.bundle.mjs` — bumping the version in the URL and in
+the banner together — replace everything below the banner, drop the closing `sourceMappingURL`
+line, and check the bundle is still self-contained, which means it declares no imports of its own.
+It is saved as `.js` rather than `.mjs` because GitHub Pages serves `.mjs` with a MIME type browsers
+refuse to import, and it is pinned to LF in `.gitattributes` so a refresh shows a diff of what
+actually changed rather than of every line.
+
+Read Trystero's release notes before a refresh, not after. Its wire format between browsers can
+change between versions, as 0.26.0's did; when it does, that is a breaking change for every app
+using the table, and belongs in [the changelog](CHANGELOG.md) with the advice to change app id.
+Check, too, that its Nostr timestamps still come from `Date.now()`, which is what the clock
+correction in `party.js` replaces.
 
 Neither library sees a roll. They establish the connection; the dice travel directly between
 browsers over it.
