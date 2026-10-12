@@ -127,8 +127,12 @@ public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Positive when this machine is behind. Measured once per page, from the <c>Date</c> header of
-    /// a request for the page itself, and reported again at every table joined on that page.
+    /// Positive when this machine is behind. Measured from the <c>Date</c> header of a request for
+    /// the page itself: before joining a table, unless the page has a measurement from the last ten
+    /// minutes that the machine's clock has not moved since; within a couple of seconds of the
+    /// machine's clock being moved — synced, set by hand, or woken from sleep; and every ten minutes
+    /// while at a table. Every new measurement is reported, so this is always the latest one: a
+    /// player who sets their clock right sees it fall to about zero without reloading.
     /// </para>
     /// <para>
     /// The table is signalled through Nostr relays, which judge an event by the clock that signed
@@ -147,16 +151,18 @@ public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string
     /// <summary>Whether the page is signalling on the site's clock rather than the machine's own.</summary>
     /// <remarks>
     /// <para>
-    /// The transport corrects a clock ten seconds or more out, before it first joins a table, and
-    /// keeps the correction for as long as the page is open: Trystero schedules by differences of
-    /// the time, so moving the clock under timers it has already set would stretch or shrink every
-    /// one of them by the whole offset.
+    /// The transport corrects a clock ten seconds or more out, and follows the machine's clock from
+    /// then on rather than keeping the correction it first made. A clock set right drops the
+    /// correction within seconds, and this goes back to <see langword="false"/> with
+    /// <see cref="ClockOffset"/> near zero; a clock set wrong in the middle of a session is
+    /// corrected just as quickly. Once made, a correction stands until the clock is back within
+    /// eight seconds, so a clock that sits on the line does not turn this on and off.
     /// </para>
     /// <para>
-    /// The consequence is that a clock measured too late for the first join is reported here and
-    /// not corrected. A large <see cref="ClockOffset"/> with this <see langword="false"/> is a
-    /// player who will probably not find anybody, and whom reloading the page — or setting the
-    /// clock — would fix.
+    /// A measurement that takes longer than a join waits for it is still put into effect when it
+    /// arrives. A large <see cref="ClockOffset"/> with this <see langword="false"/> is therefore a
+    /// page that could not correct itself — one where something has frozen JavaScript's built-in
+    /// objects — and a player who will probably not find anybody until their clock is set right.
     /// </para>
     /// </remarks>
     public bool ClockCorrected { get; private set; }
@@ -181,9 +187,11 @@ public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string
 
     /// <summary>Joins a table, leaving any current one first.</summary>
     /// <remarks>
-    /// The first join on a page waits up to three seconds for the transport to measure the clock
-    /// (see <see cref="ClockOffset"/>), because a correction has to be in place before the transport
-    /// first signals or not at all. Later joins on the same page reuse that measurement.
+    /// A join waits up to three seconds for the transport to measure the clock (see
+    /// <see cref="ClockOffset"/>) when the page has no measurement yet, the machine's clock has moved
+    /// since the last one, or the last one is more than ten minutes old, so that the transport first
+    /// signals on the right time. Otherwise it goes straight in. A measurement that takes longer is
+    /// put into effect when it arrives.
     /// </remarks>
     public async Task JoinAsync(string code)
     {
@@ -412,9 +420,16 @@ public sealed class PartyChannel(IJSRuntime js, string appId, IEnumerable<string
     /// </param>
     /// <param name="corrected">Whether the page is now signalling on the site's time.</param>
     /// <remarks>
+    /// <para>
+    /// Called at every join and again after every measurement while at the table, so a reading
+    /// replaces the last one whatever it said: a correction dropped because the clock was set right
+    /// is reported in the same way as one made because it was set wrong.
+    /// </para>
+    /// <para>
     /// JavaScript numbers include NaN and the infinities, and nothing on that side of the boundary
     /// is trusted to have ruled them out; a reading that is not a believable clock is ignored rather
     /// than turned into a <see cref="TimeSpan"/> that throws.
+    /// </para>
     /// </remarks>
     [JSInvokable]
     public void ReceiveClock(double offsetMs, bool corrected)

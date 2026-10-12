@@ -464,6 +464,86 @@ public sealed class PartyChannelTests
     }
 
     /// <summary>
+    /// The transport goes on measuring after leaving a table, and what it finds then is not shown.
+    /// </summary>
+    /// <remarks>
+    /// The page follows its machine's clock between tables too, and its next join reports where it
+    /// stands; a reading in between would put a notice on a page that is at no table.
+    /// </remarks>
+    [Fact]
+    public async Task AClockReadingArrivingAfterLeavingIsIgnored()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(281_000, corrected: true);
+        await channel.LeaveAsync();
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveClock(300, corrected: false);
+
+        Assert.Null(channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+        Assert.Equal(0, changes);
+    }
+
+    /// <summary>A clock set right while at a table clears the notice without a reload.</summary>
+    /// <remarks>
+    /// The page drops its correction within seconds of the machine's clock being synced, and says
+    /// so; a channel that held on to the first reading would go on telling the player their clock
+    /// is out after they had fixed it.
+    /// </remarks>
+    [Fact]
+    public async Task AClockSetRightDropsTheCorrection()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(281_000, corrected: true);
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveClock(300, corrected: false);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(300), channel.ClockOffset);
+        Assert.False(channel.ClockCorrected);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>A clock set wrong in the middle of a session is corrected and reported.</summary>
+    [Fact]
+    public async Task AClockSetWrongAtTheTableIsCorrected()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(-200, corrected: false);
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveClock(-300_000, corrected: true);
+
+        Assert.Equal(TimeSpan.FromMinutes(-5), channel.ClockOffset);
+        Assert.True(channel.ClockCorrected);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>A clock that moves while corrected is re-measured, and the new offset shown.</summary>
+    [Fact]
+    public async Task ANewOffsetWhileCorrectedReplacesTheOld()
+    {
+        (PartyChannel channel, _) = await JoinedAsync();
+        channel.ReceiveClock(300_000, corrected: true);
+
+        int changes = 0;
+        channel.Changed += () => changes++;
+
+        channel.ReceiveClock(-300_000, corrected: true);
+
+        Assert.Equal(TimeSpan.FromMinutes(-5), channel.ClockOffset);
+        Assert.True(channel.ClockCorrected);
+        Assert.Equal(1, changes);
+    }
+
+    /// <summary>
     /// A peer the relays found and the browser could not reach is counted, not lost.
     /// </summary>
     /// <remarks>
@@ -665,8 +745,9 @@ public sealed class PartyChannelTests
 
     /// <summary>Leaving forgets the clock reading and who could not be reached.</summary>
     /// <remarks>
-    /// The page keeps its correction, if it made one, and reports it again at the next table. What
-    /// is cleared is only this channel's account of the last one.
+    /// The page keeps any correction it has made, goes on following the machine's clock while away,
+    /// and reports where it stands at the next table. What is cleared is only this channel's account
+    /// of the last one.
     /// </remarks>
     [Fact]
     public async Task LeavingForgetsTheClockAndTheUnreachablePeers()

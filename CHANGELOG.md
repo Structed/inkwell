@@ -3,6 +3,43 @@
 What changed in each release, and what a consumer has to do about it. The tag is the version; see
 [Releasing](README.md#releasing).
 
+## 0.4.1
+
+A fix to 0.4.0's clock correction, which was measured once and then kept for the page's life. A
+player who synced their clock with the page open was left signalling on the old correction: their
+page ran fast or slow by the whole of it, and the notice still said their clock was out.
+
+No consumer change is needed. The app id, the relays, Inkwell's messages (`RollMessage`, `Hail`),
+the table code alphabet and the vendored Trystero 0.26.0 are all unchanged; 0.4.0 and 0.4.1 sit at
+the same tables.
+
+### Fixed
+
+- **The clock correction follows the machine's clock.** The transport watches the machine's clock
+  against the browser's monotonic one, every two seconds and whenever the page comes back into
+  view, and measures again within seconds of the clock being moved — synced, set by hand or woken
+  from sleep. A clock set right drops the correction; a clock set wrong mid-session is corrected.
+  It also measures again every ten minutes at a table, for drift. A move is never taken on trust:
+  it always means a fresh measurement, and a measurement that fails keeps the correction in place
+  and is retried with backoff.
+- **Leaving and rejoining measures again** when the last measurement is more than ten minutes old or
+  the machine's clock has moved since, rather than reusing the page's first answer.
+- **A late measurement is applied.** One that takes longer than the three seconds a join waits used
+  to be reported and ignored; it is put into effect when it arrives.
+- **The page's own rate limit no longer reads the corrected clock**, so a correction coming or going
+  cannot hold back or wave through a peer's messages.
+
+### Changed
+
+- `PartyChannel.ClockOffset` is the latest measurement, not the first, and changes during a session.
+- `PartyChannel.ClockCorrected` can go from `true` to `false` (the clock was set right) and from
+  `false` to `true` (it was set wrong, or a late measurement arrived) while at a table. A correction
+  stands until the clock is back within eight seconds, so one on the ten-second line does not flap.
+  A large `ClockOffset` with this `false` now only happens on a page that cannot replace `Date.now`.
+- `ReceiveClock` is called after every measurement while at a table, not only at a join. Both
+  properties raise `Changed` when they change, as before, so a clock notice clears itself.
+- `JoinAsync` waits for a measurement only when one is due, and not merely on the page's first join.
+
 ## 0.4.0
 
 A reliability release for the shared dice table. Players who could not see each other — or who saw
