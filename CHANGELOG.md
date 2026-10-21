@@ -21,7 +21,8 @@ the same tables.
   from sleep. A clock set right drops the correction; a clock set wrong mid-session is corrected.
   It also measures again every ten minutes at a table, for drift. A move is never taken on trust:
   it always means a fresh measurement, and a measurement that fails keeps the correction in place
-  and is retried with backoff.
+  and is retried with backoff. The backoff only spaces out the same question: a clock that moves
+  again after a failure is asked about at once, then backed off from the start.
 - **Leaving and rejoining measures again** when the last measurement is more than ten minutes old or
   the machine's clock has moved since, rather than reusing the page's first answer.
 - **A late measurement is applied.** One that takes longer than the three seconds a join waits used

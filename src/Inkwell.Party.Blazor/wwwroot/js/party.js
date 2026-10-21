@@ -82,7 +82,8 @@ let table = null;
 // machine's clock less the steady one when it was found, and `takenAt` when, by the steady clock.
 // `correction` is what the page's `Date.now` adds to the machine's clock, and is zero when it adds
 // nothing. `pending` is the question while it is out, and `failures` and `retryAt` say how soon to
-// ask again after one that came back with nothing.
+// ask again after one that came back with nothing; `missedDrift` is what `drift` was when it did,
+// so that a step since then can be told from the same question being asked again.
 let measured = null;
 let drift = 0;
 let takenAt = 0;
@@ -91,6 +92,7 @@ let installed = false;
 let pending = null;
 let failures = 0;
 let retryAt = 0;
+let missedDrift = 0;
 let vigil = null;
 let roused = null;
 
@@ -573,8 +575,11 @@ function take(found) {
 // replacement — by trusting the steady clock across a step, say, which some platforms stop during
 // sleep — would be wrong in ways nothing could see.
 function miss() {
+    const now = steadyNow();
+
     failures++;
-    retryAt = steadyNow() + Math.min(clockRetry * 2 ** (failures - 1), clockRefresh);
+    retryAt = now + Math.min(clockRetry * 2 ** (failures - 1), clockRefresh);
+    missedDrift = realNow() - now;
 }
 
 /// Whether the time has to be asked for again: it never has been, the machine's clock has moved
@@ -588,8 +593,29 @@ function due() {
 }
 
 /// Looks at the clock, and asks the time again if it has to and has not just failed to.
+//
+// The backoff is for asking the same question again, not for a new one. A clock that has moved since
+// the last failure — synced, set by hand, or woken from sleep, often just before the network comes
+// back — is asked about at once, and the backoff starts again from the beginning; otherwise a page
+// that had been failing for a while would leave a correction it knows to be stale in force for up to
+// `clockRefresh`. An offline page still asks once per step and then backs off, rather than every look.
 function check() {
-    if (!pending && steadyNow() >= retryAt && due()) {
+    if (pending) {
+        return;
+    }
+
+    const now = steadyNow();
+
+    if (now < retryAt) {
+        if (Math.abs(realNow() - now - missedDrift) < clockStep) {
+            return;
+        }
+
+        failures = 0;
+        retryAt = 0;
+    }
+
+    if (due()) {
         measure();
     }
 }
