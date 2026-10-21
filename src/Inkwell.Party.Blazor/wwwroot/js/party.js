@@ -37,8 +37,30 @@ const rehailInterval = 30000;
 // seconds is well inside every limit seen, and far outside what measuring over HTTP gets wrong.
 const clockTolerance = 10000;
 
-// How long a join waits to hear the time before going ahead without it.
+// How long a join waits to hear the time before going ahead without it. An answer that takes longer
+// is still put into effect when it comes.
 const clockPatience = 3000;
+
+// How often the clock is looked at, for as long as anything depends on it.
+const clockWatch = 2000;
+
+// How far the machine's clock may move against the page's steady one before the time is asked for
+// again. Syncing it, setting it by hand, or waking from a sleep the steady clock slept through moves
+// it by far more than this; NTP slewing it would take the best part of an hour to.
+const clockStep = 2000;
+
+// How far a new measurement has to be from the correction in force before the correction moves. The
+// `Date` header only counts whole seconds, so two honest measurements a minute apart can differ by
+// most of one, and following each of them would nudge every timer on the page for nothing.
+const clockHysteresis = 2000;
+
+// How often the time is asked for anyway. A clock that merely runs fast or slow drifts along with
+// the page's steady clock rather than against it, so watching one against the other never sees it.
+const clockRefresh = 600000;
+
+// How soon a question that came back with nothing is asked again. It doubles with each failure in a
+// row, up to `clockRefresh`.
+const clockRetry = 2000;
 
 // A fixed floor: the day this check was written. No server telling the truth can send a date before
 // it, so a header that does is a broken proxy, and believing it would wind the page back years. It
@@ -48,14 +70,31 @@ const earliestPlausibleDate = Date.UTC(2026, 9, 1);
 // The machine's own clock, taken before anything here has had the chance to correct it.
 const realNow = Date.now.bind(Date);
 
+// The page's steady clock. It counts from when the page opened, and nothing done to the machine's
+// clock moves it — which makes the difference between the two the way to see that being done.
+const steadyNow = performance.now.bind(performance);
+
 let table = null;
 
-// The clock is measured once per page, and the decision about whether to correct it is taken once
-// per page — before Trystero first runs, and never again. See `settle` for why it cannot be taken
-// later, or undone.
-let clock = null;
-let settled = false;
-let correction = null;
+// What the page knows about the time. See `settle` for what is done with it.
+//
+// `measured` is the last offset found, in milliseconds, or null when none has been; `drift` is the
+// machine's clock less the steady one when it was found, and `takenAt` when, by the steady clock.
+// `correction` is what the page's `Date.now` adds to the machine's clock, and is zero when it adds
+// nothing. `pending` is the question while it is out, and `failures` and `retryAt` say how soon to
+// ask again after one that came back with nothing; `missedDrift` is what `drift` was when it did,
+// so that a step since then can be told from the same question being asked again.
+let measured = null;
+let drift = 0;
+let takenAt = 0;
+let correction = 0;
+let installed = false;
+let pending = null;
+let failures = 0;
+let retryAt = 0;
+let missedDrift = 0;
+let vigil = null;
+let roused = null;
 
 /// Joins a table. Any table already open is left first, so there is only ever one.
 //
@@ -84,13 +123,14 @@ export async function join(appId, relays, code, handler) {
 
     table = current;
 
-    const offset = await hear();
+    // A clock that has never been measured, has been seen to move since, or was measured a while ago
+    // is asked about before the room is opened, so that Trystero's first signatures and first
+    // subscriptions carry the right time.
+    await hear();
 
     if (current.closed) {
         return selfId;
     }
-
-    settle(offset);
 
     // A peer that exchanged offers with us and still could not be reached — almost always two
     // networks that need a TURN server and have none — is otherwise indistinguishable from nobody
@@ -116,7 +156,7 @@ export async function join(appId, relays, code, handler) {
 
     Object.assign(current, { room, roll, ask, tale, hail });
 
-    report(current, offset);
+    tell(current);
 
     roll.onMessage = (data, from) => {
         const peer = who(from);
@@ -195,6 +235,7 @@ export async function join(appId, relays, code, handler) {
     call(current, 'ReceiveStatus', 'joining');
     watch(current);
     rehail(current);
+    keepWatch();
 
     return selfId;
 }
@@ -234,7 +275,8 @@ export function greet(json) {
 
 /// Leaves the table. Safe to call when there is no table, and safe to call twice.
 //
-// The clock correction, if there is one, is deliberately left in place. See `settle`.
+// The clock correction, if there is one, stays: the machine's clock is as wrong as it was, and the
+// page goes on following it while away from a table. See `settle`.
 export function leave() {
     if (!table) {
         return;
@@ -265,6 +307,8 @@ export function leave() {
     } catch {
         // Already gone.
     }
+
+    keepWatch();
 }
 
 /// Reports how many relays are actually carrying the signalling, and how many peers are present.
@@ -431,7 +475,7 @@ async function hello(current, peer) {
     }
 }
 
-/// Asks the site what time it is, once per page.
+/// Asks the site what time it is.
 //
 // The site is the one clock every player at a table has already agreed to trust, by loading it.
 // A HEAD request for the page itself, with a query nothing else uses and `no-store`, goes past
@@ -440,48 +484,158 @@ async function hello(current, peer) {
 // its CDN answers from cache, and so does Cloudflare Pages.
 //
 // The header is only good to the second and is truncated, not rounded, so the true time is half a
-// second past it on average; the round trip is split down the middle for the same reason.
-function measure() {
-    return clock ??= (async () => {
-        try {
-            if (typeof document === 'undefined' || typeof fetch !== 'function') {
-                return null;
-            }
-
-            const url = new URL(document.baseURI);
-            url.hash = '';
-            url.searchParams.set('inkwell-clock', realNow().toString(36) + Math.random().toString(36).slice(2));
-
-            const before = realNow();
-            const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-            const after = realNow();
-            const said = Date.parse(response.headers.get('Date') ?? '');
-
-            if (!Number.isFinite(said) || said < earliestPlausibleDate) {
-                return null;
-            }
-
-            return Math.round(said + 500 - (before + after) / 2);
-        } catch {
-            // Offline, blocked, or a host that sends no Date. The table goes ahead on the machine's
-            // own clock, which is right for nearly everybody.
+// second past it on average; the round trip is split down the middle for the same reason, timed on
+// the steady clock. Both ends are read on both clocks, too: if the machine's clock moved while the
+// question was out, there is no telling which side of the move the answer belongs to, and it is
+// thrown away rather than half believed.
+//
+// Resolves to the offset in milliseconds, with the drift, the moment it was found at and whether the
+// round trip was slow enough to leave it a second or more uncertain, or to null when there is no
+// telling.
+async function inquire() {
+    try {
+        if (typeof document === 'undefined' || typeof fetch !== 'function') {
             return null;
         }
-    })();
+
+        const url = new URL(document.baseURI);
+        url.hash = '';
+        url.searchParams.set('inkwell-clock', realNow().toString(36) + Math.random().toString(36).slice(2));
+
+        const before = realNow();
+        const sent = steadyNow();
+        const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        const received = steadyNow();
+        const after = realNow();
+        const said = Date.parse(response.headers.get('Date') ?? '');
+
+        if (!Number.isFinite(said) || said < earliestPlausibleDate) {
+            return null;
+        }
+
+        if (Math.abs(after - received - (before - sent)) >= clockStep) {
+            return null;
+        }
+
+        return {
+            offset: Math.round(said + 500 - (before + (received - sent) / 2)),
+            drift: after - received,
+            at: received,
+            rough: received - sent >= clockStep
+        };
+    } catch {
+        // Offline, blocked, or a host that sends no Date. The page goes on with whatever it had,
+        // which for nearly everybody is the machine's own clock and right.
+        return null;
+    }
 }
 
-/// Waits for the clock a little while, and no longer.
+/// Asks the time again, unless the question is already out, and puts the answer into effect.
+function measure() {
+    pending ??= inquire()
+        .then(found => found ? take(found) : miss())
+        .catch(() => { })
+        .finally(() => {
+            pending = null;
+        });
+
+    return pending;
+}
+
+/// Puts a new measurement into effect, and tells the table.
 //
-// Resolves to the offset in milliseconds, `null` when there is no telling, or `undefined` when the
-// answer is still on its way — which is different, because it may yet be worth reporting.
+// A rough one — from a round trip so slow that the answer could belong anywhere in it — is still
+// far better than a clock minutes out, and is used; but it is asked again, backing off like a
+// failure, until an answer comes back sharp.
+function take(found) {
+    measured = found.offset;
+    drift = found.drift;
+    takenAt = found.at;
+
+    if (found.rough) {
+        takenAt = -Infinity;
+        miss();
+    } else {
+        failures = 0;
+        retryAt = 0;
+    }
+
+    settle(found.offset);
+
+    if (table?.room) {
+        tell(table);
+    }
+
+    keepWatch();
+}
+
+/// Notes a question that came back with nothing, or with too little to go on, and puts off the next.
+//
+// Whatever correction is in force stays. It was right when it was measured, and guessing at a
+// replacement — by trusting the steady clock across a step, say, which some platforms stop during
+// sleep — would be wrong in ways nothing could see.
+function miss() {
+    const now = steadyNow();
+
+    failures++;
+    retryAt = now + Math.min(clockRetry * 2 ** (failures - 1), clockRefresh);
+    missedDrift = realNow() - now;
+}
+
+/// Whether the time has to be asked for again: it never has been, the machine's clock has moved
+/// since, or it was a while ago.
+function due() {
+    const now = steadyNow();
+
+    return measured === null
+        || Math.abs(realNow() - now - drift) >= clockStep
+        || now - takenAt >= clockRefresh;
+}
+
+/// Looks at the clock, and asks the time again if it has to and has not just failed to.
+//
+// The backoff is for asking the same question again, not for a new one. A clock that has moved since
+// the last failure — synced, set by hand, or woken from sleep, often just before the network comes
+// back — is asked about at once, and the backoff starts again from the beginning; otherwise a page
+// that had been failing for a while would leave a correction it knows to be stale in force for up to
+// `clockRefresh`. An offline page still asks once per step and then backs off, rather than every look.
+function check() {
+    if (pending) {
+        return;
+    }
+
+    const now = steadyNow();
+
+    if (now < retryAt) {
+        if (Math.abs(realNow() - now - missedDrift) < clockStep) {
+            return;
+        }
+
+        failures = 0;
+        retryAt = 0;
+    }
+
+    if (due()) {
+        measure();
+    }
+}
+
+/// Asks the time before a join if it has to, and waits for the answer a little while and no longer.
+//
+// A question already out, from the watch, is waited for in the same way rather than asked twice. A
+// failure's backoff is not: somebody has just asked to join, and the question is cheap.
 async function hear() {
+    if (!pending && !due()) {
+        return;
+    }
+
     let timer = null;
 
     try {
-        return await Promise.race([
+        await Promise.race([
             measure(),
             new Promise(resolve => {
-                timer = setTimeout(() => resolve(undefined), clockPatience);
+                timer = setTimeout(resolve, clockPatience);
             })
         ]);
     } finally {
@@ -489,52 +643,96 @@ async function hear() {
     }
 }
 
-/// Decides, once per page, whether the page runs on its own clock or the site's.
+/// Watches the clock for as long as anything depends on it: a table, or a page running on the
+/// site's time, which would otherwise go on adding a correction the machine no longer needs.
 //
-// Trystero reads `Date.now()` — never `new Date()` — for every Nostr timestamp it signs and every
-// `since` it subscribes with. Correcting `Date.now` before it first runs fixes both at the root, and
-// leaves the bundle verbatim.
-//
-// It has to be before, and it has to be for good. Trystero also schedules by differences of
-// `Date.now()` — a relay's backoff is stored as the moment it may next be tried — so moving the clock
-// under a timer already set would stretch or shrink it by the whole offset. Correcting after the
-// first join would do that to every timer it had set; undoing the correction on leaving would do it
-// to every timer still running. So the first join decides, the decision stands until the page
-// goes, and a measurement that arrives too late for that first join is reported but never applied.
-//
-// Only `Date.now` is replaced. Anything else on the page that asks it gets the corrected time too,
-// which is the right time; `new Date()` still says what the machine says.
-function settle(offset) {
-    if (settled) {
-        return;
-    }
+// A hidden tab's timers are throttled to a crawl, so coming back into view is a look of its own —
+// and the likeliest moment to find the clock moved, after a laptop has slept.
+function keepWatch() {
+    const needed = table !== null || correction !== 0;
 
-    settled = true;
+    if (needed && vigil === null) {
+        vigil = setInterval(check, clockWatch);
 
-    if (typeof offset !== 'number' || !Number.isFinite(offset) || Math.abs(offset) < clockTolerance) {
-        return;
-    }
+        if (typeof document !== 'undefined') {
+            roused = () => {
+                if (document.visibilityState === 'visible') {
+                    check();
+                }
+            };
 
-    try {
-        Date.now = () => realNow() + offset;
-        correction = offset;
-    } catch {
-        // A page that has frozen its built-ins. It keeps its own clock, and says so.
+            document.addEventListener('visibilitychange', roused);
+        }
+    } else if (!needed && vigil !== null) {
+        clearInterval(vigil);
+        vigil = null;
+
+        if (roused) {
+            document.removeEventListener('visibilitychange', roused);
+            roused = null;
+        }
     }
 }
 
-/// Tells C# how far out the machine's clock was found to be, and whether the page is running on it.
-function report(current, offset) {
-    const tell = measured => {
-        if (typeof measured === 'number' && Number.isFinite(measured)) {
-            call(current, 'ReceiveClock', measured, correction !== null);
-        }
-    };
+/// Decides whether the page runs on the machine's clock or the site's, and by how much.
+//
+// Trystero reads `Date.now()` — never `new Date()` — for every Nostr timestamp it signs and every
+// `since` it subscribes with. Correcting `Date.now` fixes both at the root, and leaves the bundle
+// verbatim. Only `Date.now` is replaced: anything else on the page that asks it gets the corrected
+// time too, which is the right time, and `new Date()` still says what the machine says.
+//
+// A clock ten seconds or more out is corrected by the whole of the offset; anything less is left
+// alone, being well inside what every relay accepts. Once corrected, a page stays corrected until it
+// is back within eight seconds, and a new measurement moves the correction only when it is two or
+// more seconds from it, so a clock sitting on the line, or a header that truncates the other way,
+// does not move the page's clock back and forth for nothing.
+//
+// The correction follows the machine's clock rather than standing for the page's life. Trystero
+// also schedules by differences of `Date.now()` — a relay's backoff is stored as the moment it may
+// next be tried, and a transfer times out by how long since it was last heard from — so moving the
+// page's clock moves those timers by as much. 0.4.0 took that to mean the clock could only be
+// corrected before Trystero first ran, and never touched again. But the machine's clock moves under
+// those timers regardless: syncing it, or setting it by hand, jumps `Date.now` in a page that was
+// never corrected at all, and in a page that was, a correction left standing turns the step into a
+// page that is wrong by the whole of it for good. So a step is seen within a couple of seconds, the
+// time is asked for again, and the correction moves to match. The page's clock is out for about as
+// long as that takes and then right again, which also puts Trystero's timers back about where they
+// were before the step. A measurement that arrives after a join has stopped waiting for it is put
+// into effect for the same reason: the timers it moves were set on a clock the relays were refusing.
+function settle(offset) {
+    const tolerance = correction === 0 ? clockTolerance : clockTolerance - clockHysteresis;
+    const wanted = Math.abs(offset) >= tolerance ? offset : 0;
 
-    if (offset === undefined) {
-        measure().then(tell, () => { });
-    } else {
-        tell(offset);
+    if (Math.abs(wanted - correction) < clockHysteresis || (wanted !== 0 && !install())) {
+        return;
+    }
+
+    correction = wanted;
+}
+
+/// Replaces `Date.now` with one that adds the correction, the first time there is one to add.
+//
+// Once replaced it stays replaced, adding nothing when there is nothing to add. Putting the original
+// back would gain nothing, and would undo anything else on the page that had wrapped it since.
+function install() {
+    if (!installed) {
+        try {
+            const corrected = () => realNow() + correction;
+            Date.now = corrected;
+            installed = Date.now === corrected;
+        } catch {
+            // A page that has frozen its built-ins. It keeps its own clock, and says so.
+        }
+    }
+
+    return installed;
+}
+
+/// Tells C# how far out the machine's clock was last found to be, and whether the page is allowing
+/// for it. Said at every join, and again after every measurement while at a table.
+function tell(current) {
+    if (measured !== null) {
+        call(current, 'ReceiveClock', measured, correction !== 0);
     }
 }
 
@@ -563,8 +761,11 @@ function who(from) {
 }
 
 /// A token bucket per peer per kind of message.
+//
+// Counted on the steady clock. On `Date.now` a window opened just before the clock moved back would
+// not close until the clock caught up with it again, and a peer could be shut out for minutes.
 function allow(current, peer, kind, allowance) {
-    const now = Date.now();
+    const now = steadyNow();
     const key = peer + '\u0000' + kind;
     const seen = current.allowances.get(key);
 

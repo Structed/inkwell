@@ -179,13 +179,19 @@ measures both, so a page can.
 it. Most refuse an ephemeral event more than a minute old; some refuse one far in the future; and
 relays that take a skewed event anyway hide it behind other players' `since`, or hide everybody
 else's from a fast clock, whose subscription starts from a moment nobody else has reached. A player
-whose clock is a minute out meets nobody either way. So before it first joins a table,
-the transport asks the site for the time — a `HEAD` request for the page, read from its `Date`
-header — and, if the machine is ten seconds or more out, signals on the site's clock for the rest
-of the page's life. `ClockOffset` says how far out it was found to be (positive when the machine is
-behind; `null` if the site could not be asked) and `ClockCorrected` whether the page acted on it.
-The measurement waits at most three seconds; one that arrives later is reported but not applied,
-so a large offset with `ClockCorrected` false is a player who should reload or fix their clock.
+whose clock is a minute out meets nobody either way. So the transport asks the site for the time —
+a `HEAD` request for the page, read from its `Date` header — and, if the machine is ten seconds or
+more out, signals on the site's clock instead. It asks before joining a table, unless it already
+knows from the last ten minutes; again within a couple of seconds of the machine's clock being moved
+— synced, set by hand, or woken from sleep — which it notices by watching the clock against the
+browser's monotonic one; and every ten minutes at a table, for drift. The correction follows each
+answer, so a player who sets their clock right mid-session is back on their own clock, and one whose
+clock is set wrong is corrected, within seconds. `ClockOffset` is the latest measurement (positive
+when the machine is behind; `null` if the site could not be asked) and `ClockCorrected` whether the
+page is acting on it; both change during a session, and raise `Changed` when they do. A join waits
+at most three seconds for a measurement it needs, and one that arrives later is applied when it
+does, so a large offset with `ClockCorrected` false only happens on a page that cannot replace
+`Date.now` — one whose built-ins something has frozen — and the player has to fix their clock.
 
 **A connection that could not be made.** Two browsers can find each other through the relays and
 still fail to connect directly — almost always two networks that need a TURN server, with none
@@ -195,7 +201,7 @@ until they connect, say hello or leave.
 ```razor
 @if (channel.ClockOffset is { } offset && !channel.ClockCorrected && offset.Duration() >= TimeSpan.FromSeconds(10))
 {
-    <p>Your clock is @offset.Duration().TotalSeconds.ToString("0") seconds out. Reload the page, or set it right.</p>
+    <p>Your clock is @offset.Duration().TotalSeconds.ToString("0") seconds out. Set it right to play.</p>
 }
 @if (channel.Unreachable > 0)
 {
